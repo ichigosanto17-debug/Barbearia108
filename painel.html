@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel — Barbearia 108</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',sans-serif}
+body{background:#1a1a1a;color:#fff;min-height:100vh;padding:18px;max-width:560px;margin:0 auto}
+h1{color:#d4af37;font-size:22px;margin-bottom:4px}
+.sub{color:#aaa;font-size:14px;margin-bottom:16px}
+input,button{width:100%;padding:13px;border-radius:8px;border:1px solid #444;font-size:16px;margin-bottom:10px}
+input{background:#383838;color:#fff}
+button{background:linear-gradient(135deg,#d4af37,#b8941f);color:#000;font-weight:bold;border:none;cursor:pointer}
+.topo{display:flex;gap:8px;margin-bottom:14px}.topo button{margin:0;padding:10px;font-size:14px}
+.topo .sec{background:#383838;color:#fff;font-weight:normal}
+.dia{color:#d4af37;margin:18px 0 8px;font-size:16px;text-transform:capitalize}
+.card{background:#2a2a2a;border-left:3px solid #d4af37;border-radius:12px;padding:14px;margin-bottom:10px}
+.card.confirmado{border-left-color:#4caf50}.card.cancelado{border-left-color:#e53935;opacity:.55}
+.hora{font-size:18px;font-weight:bold}.linha{font-size:14px;margin-top:4px;color:#ddd;word-break:break-word}
+.tag{font-size:12px;padding:2px 8px;border-radius:10px;background:#444;margin-left:6px}
+.acoes{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.acoes button,.acoes a{flex:1;min-width:90px;margin:0;padding:9px;font-size:13px;border-radius:8px;text-align:center;text-decoration:none;border:none;cursor:pointer;font-weight:600}
+.ok{background:#4caf50;color:#000}.no{background:#e53935;color:#fff}.wa{background:#25d366;color:#000}
+.msg{color:#e8a33d;font-size:14px;margin:8px 0}
+</style>
+</head>
+<body>
+<div id="login">
+  <h1>✂️ Painel — Barbearia 108</h1>
+  <p class="sub">Entre com seu e-mail e senha.</p>
+  <input type="email" id="email" placeholder="E-mail" autocomplete="username">
+  <input type="password" id="senha" placeholder="Senha" autocomplete="current-password">
+  <button id="entrar">Entrar</button>
+  <p class="msg" id="erro"></p>
+</div>
+<div id="app" style="display:none">
+  <h1>✂️ Agenda — Rômulo Rocha</h1>
+  <p class="sub" id="contagem"></p>
+  <div class="topo"><button id="atualizar">🔄 Atualizar</button><button class="sec" id="sair">Sair</button></div>
+  <div id="lista"></div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://lkqpuliqsmsllezbjjmg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_EJt_2gWwUnPJou-aaEVNmQ_ZJrQU3CJ';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+let timer;
+
+function hojeISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function el(tag, cls, txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e}
+
+async function entrar(){
+  $('erro').textContent='';
+  const {error} = await sb.auth.signInWithPassword({email:$('email').value.trim(), password:$('senha').value});
+  if(error){ $('erro').textContent='⚠️ E-mail ou senha incorretos.'; return; }
+  abrir();
+}
+async function abrir(){
+  $('login').style.display='none'; $('app').style.display='block';
+  await carregar(); clearInterval(timer); timer=setInterval(carregar,30000);
+}
+async function carregar(){
+  const {data,error} = await sb.from('b108_agendamentos').select('*').gte('data',hojeISO()).order('data').order('horario');
+  const lista=$('lista'); lista.innerHTML='';
+  if(error){ lista.appendChild(el('p','msg','⚠️ Não foi possível carregar a agenda.')); return; }
+  const ativos=data.filter(a=>a.status!=='cancelado').length;
+  $('contagem').textContent = ativos+' agendamento(s) a partir de hoje';
+  if(!data.length){ lista.appendChild(el('p','sub','Nenhum agendamento por enquanto.')); return; }
+  let diaAtual='';
+  data.forEach(a=>{
+    if(a.data!==diaAtual){ diaAtual=a.data;
+      lista.appendChild(el('h3','dia',new Date(a.data+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'}))); }
+    const c=el('div','card '+a.status);
+    const t=el('div','hora',a.horario); t.appendChild(el('span','tag',a.status)); c.appendChild(t);
+    c.appendChild(el('div','linha','👤 '+a.nome+' • 📱 '+a.telefone));
+    c.appendChild(el('div','linha','💈 '+a.servico+' — R$ '+(a.preco||'')));
+    if(a.mensagem) c.appendChild(el('div','linha','💬 '+a.mensagem));
+    const ac=el('div','acoes');
+    if(a.status==='pendente'){ const b=el('button','ok','✅ Confirmar'); b.onclick=()=>mudar(a.id,'confirmado'); ac.appendChild(b); }
+    if(a.status!=='cancelado'){ const b=el('button','no','✖ Cancelar'); b.onclick=()=>{ if(confirm('Cancelar este horário? Ele ficará livre de novo.')) mudar(a.id,'cancelado'); }; ac.appendChild(b); }
+    const num='55'+a.telefone.replace(/\D/g,'');
+    const txt={confirmado:'Olá '+a.nome+'! Seu horário na Barbearia 108 está confirmado: '+a.horario+' do dia '+a.data.split('-').reverse().join('/')+'. Te espero! ✂️',
+               cancelado:'Olá '+a.nome+', precisei cancelar seu horário na Barbearia 108. Podemos remarcar?'}[a.status]||'Olá '+a.nome+'! Sobre seu horário na Barbearia 108 ('+a.horario+')...';
+    const w=el('a','wa','💬 WhatsApp'); w.href='https://wa.me/'+num+'?text='+encodeURIComponent(txt); w.target='_blank'; w.rel='noopener'; ac.appendChild(w);
+    c.appendChild(ac); lista.appendChild(c);
+  });
+}
+async function mudar(id,status){
+  const {error}=await sb.from('b108_agendamentos').update({status}).eq('id',id);
+  if(error) alert('⚠️ Não foi possível atualizar.'); else carregar();
+}
+$('entrar').onclick=entrar;
+$('senha').addEventListener('keydown',e=>{if(e.key==='Enter')entrar()});
+$('atualizar').onclick=carregar;
+$('sair').onclick=async()=>{await sb.auth.signOut();clearInterval(timer);$('app').style.display='none';$('login').style.display='block'};
+sb.auth.getSession().then(({data})=>{ if(data.session) abrir(); });
+</script>
+</body>
+</html>
